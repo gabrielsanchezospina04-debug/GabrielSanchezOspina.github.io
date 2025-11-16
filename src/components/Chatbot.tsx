@@ -14,13 +14,7 @@ import {
   ChatContainerRoot,
   ChatContainerScrollAnchor,
 } from "@/components/prompt-kit/chat-container";
-import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageAvatar,
-  MessageContent,
-} from "@/components/prompt-kit/message";
+import { Message, MessageAction, MessageActions, MessageContent } from "@/components/prompt-kit/message";
 import {
   PromptInput,
   PromptInputAction,
@@ -36,6 +30,10 @@ import {
   Copy,
   Image,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Boxes,
+  Cpu,
   Plus,
   ThumbsDown,
   ThumbsUp,
@@ -210,6 +208,23 @@ function createInitialMessages(): ConversationMessage[] {
   }));
 }
 
+function updateConversationInGroups(
+  groups: HistoryGroup[],
+  conversationId: string,
+  updater: (existing: HistoryConversation) => HistoryConversation,
+): HistoryGroup[] {
+  const next = cloneHistoryGroups(groups);
+  for (const section of next) {
+    const index = section.conversations.findIndex((c) => c.id === conversationId);
+    if (index !== -1) {
+      const existing = section.conversations[index];
+      section.conversations[index] = updater(existing);
+      break;
+    }
+  }
+  return next;
+}
+
 function createPlaceholderConversation(title: string, preview: string): ConversationMessage[] {
   return [
     {
@@ -325,6 +340,9 @@ function Chatbot() {
   const [selectedProviderId, setSelectedProviderId] = useState(providers[0].id);
   const [selectedModelId, setSelectedModelId] = useState(providers[0].models[0].id);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isProviderMenuOpen, setIsProviderMenuOpen] = useState(false);
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
 
   const activeProvider =
     providers.find((provider) => provider.id === selectedProviderId) ?? providers[0];
@@ -359,9 +377,9 @@ function Chatbot() {
 
   const refreshHistoryPreview = (conversationId: string, preview: string, title?: string) => {
     setHistoryGroups((previous) =>
-      promoteConversation(previous, conversationId, (existing) => ({
-        id: existing?.id ?? conversationId,
-        title: title ?? existing?.title ?? "Untitled chat",
+      updateConversationInGroups(previous, conversationId, (existing) => ({
+        id: existing.id,
+        title: title ?? existing.title,
         preview: truncateText(preview),
         timestamp: "Just now",
       })),
@@ -507,7 +525,7 @@ function Chatbot() {
     setChatCounter((count) => count + 1);
     setConversations((previous) => ({
       ...previous,
-      [conversationId]: createInitialMessages(),
+      [conversationId]: [],
     }));
     setActiveConversationId(conversationId);
     setActiveConversationTitle(conversationTitle);
@@ -517,14 +535,22 @@ function Chatbot() {
     setIsGenerating(false);
     setIsSidebarOpen(false);
 
-    setHistoryGroups((previous) =>
-      promoteConversation(previous, conversationId, () => ({
-        id: conversationId,
-        title: conversationTitle,
-        preview: "Say hello to Nova to get started.",
-        timestamp: "Just now",
-      })),
-    );
+    setHistoryGroups((previous) => {
+      const next = cloneHistoryGroups(previous);
+      if (next.length === 0) {
+        next.push({ label: "Today", conversations: [] });
+      }
+      next[0].conversations = [
+        {
+          id: conversationId,
+          title: conversationTitle,
+          preview: "Say hello to Nova to get started.",
+          timestamp: "Just now",
+        },
+        ...next[0].conversations,
+      ];
+      return next;
+    });
   };
 
   const handleSelectConversation = (conversation: HistoryConversation) => {
@@ -551,7 +577,7 @@ function Chatbot() {
     });
 
     setHistoryGroups((previous) =>
-      promoteConversation(previous, conversation.id, (existing) => existing ?? { ...conversation }),
+      updateConversationInGroups(previous, conversation.id, (existing) => existing ?? { ...conversation }),
     );
   };
 
@@ -559,19 +585,21 @@ function Chatbot() {
 
   return (
     <div className="relative flex h-full overflow-hidden bg-background text-foreground">
-      {isSidebarOpen ? (
-        <div
-          className="fixed inset-0 z-20 bg-black/40 backdrop-blur-sm lg:hidden"
-          onClick={() => setIsSidebarOpen(false)}
-          aria-hidden="true"
-        />
-      ) : null}
+      <div
+        className={cn(
+          "fixed inset-0 z-20 bg-black/40 backdrop-blur-sm lg:hidden transition-opacity duration-300",
+          isSidebarOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+        )}
+        onClick={() => setIsSidebarOpen(false)}
+        aria-hidden="true"
+      />
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-30 flex w-72 flex-col border-r border-border bg-card shadow-xl transition-transform duration-200 ease-out",
+          "fixed inset-y-0 left-0 z-30 flex w-72 flex-col border-r border-border bg-card shadow-xl transition-transform duration-300 ease-in-out",
           isSidebarOpen ? "translate-x-0" : "-translate-x-full",
-          "lg:static lg:flex lg:h-full lg:translate-x-0 lg:shadow-none",
+          "lg:static lg:h-full lg:shadow-none",
+          isSidebarCollapsed ? "lg:hidden" : "lg:flex lg:translate-x-0",
         )}
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-4">
@@ -581,15 +609,18 @@ function Chatbot() {
             </p>
             <p className="text-sm font-medium text-foreground">Recent chats</p>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden"
-            onClick={() => setIsSidebarOpen(false)}
-            aria-label="Close chat history"
-          >
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <ThemeToggle className="lg:hidden" />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="lg:hidden"
+              onClick={() => setIsSidebarOpen(false)}
+              aria-label="Close chat history"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         <div className="border-b border-border px-4 pb-4 pt-3">
           <Button variant="outline" size="sm" className="w-full" onClick={handleNewChat}>
@@ -612,7 +643,7 @@ function Chatbot() {
                       type="button"
                       className={cn(
                         "w-full rounded-xl border border-transparent bg-transparent px-3 py-2 text-left transition hover:border-border hover:bg-accent/40",
-                        isActive && "border-primary/40 bg-primary/10",
+                        isActive && "border-border bg-accent/40",
                       )}
                       onClick={() => handleSelectConversation(conversation)}
                     >
@@ -637,15 +668,30 @@ function Chatbot() {
       <main className="flex h-full flex-1 flex-col overflow-hidden">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-4 sm:px-8">
           <div className="flex min-w-0 flex-1 items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="lg:hidden"
-              onClick={() => setIsSidebarOpen(true)}
-              aria-label="Open chat history"
-            >
-              <Menu className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="lg:hidden"
+                onClick={() => setIsSidebarOpen(true)}
+                aria-label="Open chat history"
+              >
+                <Menu className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="hidden lg:inline-flex"
+                onClick={() => setIsSidebarCollapsed((v) => !v)}
+                aria-label={isSidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+              >
+                {isSidebarCollapsed ? (
+                  <PanelLeftOpen className="h-4 w-4" />
+                ) : (
+                  <PanelLeftClose className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
                 Nova
@@ -659,42 +705,7 @@ function Chatbot() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1.5">
-              <label className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">
-                Provider
-                <select
-                  className="bg-transparent text-sm text-foreground focus:outline-none"
-                  value={selectedProviderId}
-                  onChange={(event) => setSelectedProviderId(event.target.value)}
-                >
-                  {providers.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <span className="text-muted-foreground">·</span>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-muted-foreground">
-                Model
-                <select
-                  className="bg-transparent text-sm text-foreground focus:outline-none"
-                  value={selectedModelId}
-                  onChange={(event) => setSelectedModelId(event.target.value)}
-                >
-                  {activeProvider.models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <ThemeToggle />
-            <Button variant="outline" size="sm" onClick={handleNewChat}>
-              <Plus className="h-4 w-4" />
-              <span className="ml-2 hidden md:inline">New chat</span>
-            </Button>
+            <ThemeToggle className="hidden lg:inline-flex" />
           </div>
         </header>
 
@@ -709,16 +720,9 @@ function Chatbot() {
                   return (
                     <Message
                       key={message.id}
-                      className={cn(isUser && "flex-row-reverse text-right")}
+                      className={cn(isUser ? "justify-end" : "justify-start")}
                       aria-live="polite"
                     >
-                      <MessageAvatar
-                        alt={message.name}
-                        className={isUser ? "bg-primary text-primary-foreground" : "bg-muted text-foreground"}
-                        fallback={message.avatarFallback}
-                        src={message.avatarUrl ?? ""}
-                      />
-
                       <div className={cn("flex max-w-[38rem] flex-col gap-2", isUser ? "items-end" : "items-start")}>
                         <span className="text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
                           {message.name}
@@ -727,7 +731,7 @@ function Chatbot() {
                           <MessageContent
                             markdown={message.markdown}
                             className={cn(
-                              "rounded-3xl px-5 py-3 text-sm leading-6 shadow-sm transition-colors",
+                              "rounded-3xl px-5 py-3 text-sm leading-6 shadow-sm transition-colors text-left",
                               isUser
                                 ? "bg-primary text-primary-foreground"
                                 : "bg-muted text-foreground prose-headings:mt-0 prose-headings:font-semibold prose-p:mt-2",
@@ -864,7 +868,7 @@ function Chatbot() {
             disabled={isGenerating}
           >
             <div className="flex flex-col gap-3">
-              {composerAttachments.length > 0 ? (
+              {composerAttachments.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted-foreground">
                     Attachments
@@ -900,15 +904,11 @@ function Chatbot() {
                     ))}
                   </div>
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Tip: paste screenshots directly into the composer to attach them.
-                </p>
               )}
 
               <PromptInputTextarea
                 aria-label="Message"
-                placeholder="Send a message, paste context, or describe the workflow you want to automate."
+                placeholder="Message"
                 onPaste={handlePasteImages}
               />
 
@@ -929,6 +929,90 @@ function Chatbot() {
                       </label>
                     </Button>
                   </PromptInputAction>
+
+                  <div className="relative">
+                    <PromptInputAction tooltip="Select provider" side="top">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-full"
+                        aria-haspopup="listbox"
+                        aria-expanded={isProviderMenuOpen}
+                        onClick={() => {
+                          setIsProviderMenuOpen((v) => !v);
+                          setIsModelMenuOpen(false);
+                        }}
+                      >
+                        <Boxes className="h-5 w-5" />
+                      </Button>
+                    </PromptInputAction>
+                    {isProviderMenuOpen ? (
+                      <div className="absolute bottom-10 left-0 z-10 w-44 rounded-lg border border-border bg-card p-1 shadow-md">
+                        {providers.map((provider) => (
+                          <button
+                            key={provider.id}
+                            type="button"
+                            className={cn(
+                              "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-accent/60",
+                              selectedProviderId === provider.id && "bg-accent/40",
+                            )}
+                            role="option"
+                            aria-selected={selectedProviderId === provider.id}
+                            onClick={() => {
+                              setSelectedProviderId(provider.id);
+                              setIsProviderMenuOpen(false);
+                            }}
+                          >
+                            <span className="truncate">{provider.label}</span>
+                            {selectedProviderId === provider.id ? <Check className="h-4 w-4" /> : null}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="relative">
+                    <PromptInputAction tooltip="Select model" side="top">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-full"
+                        aria-haspopup="listbox"
+                        aria-expanded={isModelMenuOpen}
+                        onClick={() => {
+                          setIsModelMenuOpen((v) => !v);
+                          setIsProviderMenuOpen(false);
+                        }}
+                      >
+                        <Cpu className="h-5 w-5" />
+                      </Button>
+                    </PromptInputAction>
+                    {isModelMenuOpen ? (
+                      <div className="absolute bottom-10 left-0 z-10 w-44 rounded-lg border border-border bg-card p-1 shadow-md">
+                        {activeProvider.models.map((model) => (
+                          <button
+                            key={model.id}
+                            type="button"
+                            className={cn(
+                              "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-accent/60",
+                              selectedModelId === model.id && "bg-accent/40",
+                            )}
+                            role="option"
+                            aria-selected={selectedModelId === model.id}
+                            onClick={() => {
+                              setSelectedModelId(model.id);
+                              setIsModelMenuOpen(false);
+                            }}
+                          >
+                            <span className="truncate">{model.label}</span>
+                            {selectedModelId === model.id ? <Check className="h-4 w-4" /> : null}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
                 <PromptInputActions>
                   <PromptInputAction tooltip="Send message" delayDuration={100}>
