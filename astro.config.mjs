@@ -14,6 +14,7 @@ export default defineConfig({
         '@': fileURLToPath(new URL('./src', import.meta.url))
       }
     },
+    site: 'https://GabrielSanchezOspina.github.io'
     plugins: [tailwindcss()]
   }
 });
